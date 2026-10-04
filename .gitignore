@@ -23,7 +23,8 @@ dist/
 *.egg-info/
 
 # VS Code local settings
-.vscode/
+.vscode/*
+!.vscode/mcp.json
 
 # OS files
 .DS_Store
