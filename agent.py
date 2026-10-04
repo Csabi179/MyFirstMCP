@@ -1,43 +1,23 @@
 import json
-import os
 import sys
 from pathlib import Path
 
 import anyio
 from dotenv import load_dotenv
-from groq import AsyncGroq
 from mcp import Client, StdioServerParameters
+
+from providers.base import ChatMessage, ToolSpec
+from providers.factory import create_provider
 
 
 load_dotenv()
 
 PROJECT_DIR = Path(__file__).resolve().parent
-MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 MAX_TOOL_ITERATIONS = 5
 
 
-def convert_mcp_tools_to_groq(mcp_tools):
-    """Convert MCP tool definitions to Groq function-calling format."""
-
-    groq_tools = []
-
-    for tool in mcp_tools:
-        groq_tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "parameters": tool.input_schema,
-                },
-            }
-        )
-
-    return groq_tools
-
-
 def mcp_result_to_text(result) -> str:
-    """Convert an MCP tool result to text that can be sent to the LLM."""
+    """Convert an MCP result to provider-independent text."""
 
     if result.structured_content is not None:
         payload = {
@@ -54,7 +34,10 @@ def mcp_result_to_text(result) -> str:
             ],
         }
 
-    return json.dumps(payload, ensure_ascii=False)
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+    )
 
 
 async def run_agent(user_prompt: str) -> str:
@@ -64,111 +47,126 @@ async def run_agent(user_prompt: str) -> str:
         cwd=PROJECT_DIR,
     )
 
+    provider = create_provider()
+
+    print(
+        f"LLM provider: {provider.provider_name}"
+    )
+    print(
+        f"Model: {provider.model_name}"
+    )
+
     async with Client(server_params) as mcp_client:
         tools_response = await mcp_client.list_tools()
 
-        groq_tools = convert_mcp_tools_to_groq(
-            tools_response.tools
-        )
-
-        available_tool_names = {
-            tool.name for tool in tools_response.tools
-        }
-
-        print("MCP tools available to the model:")
-
-        for tool in tools_response.tools:
-            print(f"- {tool.name}: {tool.description}")
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a helpful assistant. "
-                    "When the user's request matches an available tool, "
-                    "use that tool instead of performing the operation "
-                    "yourself."
-                ),
-            },
-            {
-                "role": "user",
-                "content": user_prompt,
-            },
+        tools = [
+            ToolSpec(
+                name=tool.name,
+                description=tool.description or "",
+                input_schema=tool.input_schema,
+            )
+            for tool in tools_response.tools
         ]
 
-        async with AsyncGroq() as groq_client:
-            for iteration in range(MAX_TOOL_ITERATIONS):
-                response = await groq_client.chat.completions.create(
-                    model=MODEL,
-                    messages=messages,
-                    tools=groq_tools,
-                    tool_choice="auto",
-                    temperature=0,
+        available_tool_names = {
+            tool.name
+            for tool in tools_response.tools
+        }
+
+        print("\nMCP tools available to the model:")
+
+        for tool in tools:
+            print(
+                f"- {tool.name}: "
+                f"{tool.description}"
+            )
+
+        messages = [
+            ChatMessage(
+                role="system",
+                content=(
+                    "You are a helpful assistant. "
+                    "When the user's request matches "
+                    "an available tool, use that tool "
+                    "instead of performing the operation "
+                    "yourself."
+                ),
+            ),
+            ChatMessage(
+                role="user",
+                content=user_prompt,
+            ),
+        ]
+
+        for _ in range(MAX_TOOL_ITERATIONS):
+            response = await provider.complete(
+                messages=messages,
+                tools=tools,
+            )
+
+            if not response.tool_calls:
+                return response.text or ""
+
+            messages.append(
+                ChatMessage(
+                    role="assistant",
+                    content=response.text,
+                    tool_calls=response.tool_calls,
+                )
+            )
+
+            for tool_call in response.tool_calls:
+                if tool_call.name not in available_tool_names:
+                    raise ValueError(
+                        "Model requested unknown tool: "
+                        f"{tool_call.name}"
+                    )
+
+                print(
+                    f"\nModel selected tool: "
+                    f"{tool_call.name}"
+                    f"({tool_call.arguments})"
                 )
 
-                response_message = response.choices[0].message
-                tool_calls = response_message.tool_calls or []
+                tool_result = await mcp_client.call_tool(
+                    tool_call.name,
+                    tool_call.arguments,
+                )
 
-                if not tool_calls:
-                    return response_message.content or ""
+                tool_result_text = mcp_result_to_text(
+                    tool_result
+                )
 
-                messages.append(response_message)
+                print(
+                    f"MCP tool result: "
+                    f"{tool_result_text}"
+                )
 
-                for tool_call in tool_calls:
-                    tool_name = tool_call.function.name
-
-                    if tool_name not in available_tool_names:
-                        raise ValueError(
-                            f"Model requested unknown tool: {tool_name}"
-                        )
-
-                    tool_arguments = json.loads(
-                        tool_call.function.arguments
+                messages.append(
+                    ChatMessage(
+                        role="tool",
+                        content=tool_result_text,
+                        tool_call_id=tool_call.id,
+                        name=tool_call.name,
                     )
+                )
 
-                    print(
-                        f"\nModel selected tool: "
-                        f"{tool_name}({tool_arguments})"
-                    )
-
-                    tool_result = await mcp_client.call_tool(
-                        tool_name,
-                        tool_arguments,
-                    )
-
-                    tool_result_text = mcp_result_to_text(
-                        tool_result
-                    )
-
-                    print(
-                        f"MCP tool result: {tool_result_text}"
-                    )
-
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_name,
-                            "content": tool_result_text,
-                        }
-                    )
-
-            return (
-                "The agent reached the maximum number "
-                "of tool iterations."
-            )
+        return (
+            "The agent reached the maximum number "
+            "of tool iterations."
+        )
 
 
 async def main() -> None:
-    print(f"Model: {MODEL}")
-
-    user_prompt = input("\nYou: ").strip()
+    user_prompt = input("You: ").strip()
 
     if not user_prompt:
         print("Please enter a question.")
         return
 
-    answer = await run_agent(user_prompt)
+    answer = await run_agent(
+        user_prompt
+    )
 
     print(f"\nAssistant: {answer}")
 
