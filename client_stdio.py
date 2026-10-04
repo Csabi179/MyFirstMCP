@@ -28,7 +28,7 @@ async def main() -> None:
         for tool in tools.tools:
             print(f"- {tool.name}: {tool.description}")
 
-        result = await client.call_tool(
+        add_result = await client.call_tool(
             "add",
             {
                 "a": 10,
@@ -36,9 +36,23 @@ async def main() -> None:
             },
         )
 
-        print("\nTool result:")
-        print(f"  Error: {result.is_error}")
-        print(f"  Structured content: {result.structured_content}")
+        print("\nAdd tool result:")
+        print(f"  Error: {add_result.is_error}")
+        print(f"  Structured content: {add_result.structured_content}")
+
+        word_count_result = await client.call_tool(
+            "count_words",
+            {
+                "text": "Model Context Protocol is very interesting",
+            },
+        )
+
+        print("\nCount words tool result:")
+        print(f"  Error: {word_count_result.is_error}")
+        print(
+            f"  Structured content: "
+            f"{word_count_result.structured_content}"
+        )
 
 
 if __name__ == "__main__":
