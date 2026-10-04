@@ -1,6 +1,7 @@
 import os
 
 from providers.base import LLMProvider
+from providers.gemini_provider import GeminiProvider
 from providers.groq_provider import GroqProvider
 
 
@@ -17,6 +18,11 @@ def create_provider() -> LLMProvider:
 
     if provider_name == "groq":
         return GroqProvider(
+            model_name=model_name,
+        )
+
+    if provider_name == "gemini":
+        return GeminiProvider(
             model_name=model_name,
         )
 
