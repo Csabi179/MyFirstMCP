@@ -157,25 +157,22 @@ class GeminiProvider:
             function_response_parts = []
 
             for message in new_tool_messages:
-                function_response_parts = []
-
-                for message in new_tool_messages:
-                    function_response_parts.append(
-                        types.Part.from_function_response(
-                            name=message.name or "",
-                            response=self._tool_result_to_payload(
-                                message
-                            ),
-                        )
+                function_response_parts.append(
+                    types.Part.from_function_response(
+                        name=message.name or "",
+                        response=self._tool_result_to_payload(
+                            message
+                        ),
                     )
-
-                self._processed_tool_messages = len(
-                    tool_messages
                 )
 
-                response = await self._chat.send_message(
-                    function_response_parts
-                )
+            self._processed_tool_messages = len(
+                tool_messages
+            )
+
+            response = await self._chat.send_message(
+                function_response_parts
+            )
 
         tool_calls = []
 
