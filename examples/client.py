@@ -1,6 +1,13 @@
-import anyio
+import sys
+from pathlib import Path
 
+import anyio
 from mcp import Client
+
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_DIR))
+
 from server import mcp
 
 
@@ -29,7 +36,10 @@ async def main() -> None:
         print("Tool result:")
         print(f"  Error: {result.is_error}")
         print(f"  Content: {result.content}")
-        print(f"  Structured content: {result.structured_content}")
+        print(
+            f"  Structured content: "
+            f"{result.structured_content}"
+        )
 
 
 if __name__ == "__main__":

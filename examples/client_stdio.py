@@ -5,7 +5,7 @@ import anyio
 from mcp import Client, StdioServerParameters
 
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 
 async def main() -> None:
