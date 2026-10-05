@@ -24,7 +24,7 @@ dist/
 
 # VS Code local settings
 .vscode/*
-!.vscode/mcp.json
+
 
 # OS files
 .DS_Store
